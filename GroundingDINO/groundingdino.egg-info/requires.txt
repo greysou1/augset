@@ -1,0 +1,10 @@
+addict
+numpy
+opencv-python
+pycocotools
+supervision==0.3.2
+timm
+torch
+torchvision
+transformers
+yapf
