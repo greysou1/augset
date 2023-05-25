@@ -1,31 +1,10 @@
-from grounded_sam_demo import *
-from segment_anything import sam_model_registry
-from tqdm import tqdm
-from decimal import Decimal
 import cv2
 import cProfile
+from helper import *
+from tqdm import tqdm
 import simplejson as sjson
-
-def draw_bounding_boxes(image, bounding_boxes, output_path):
-    # Load the image
-    # image = cv2.imread(image_path)
-
-    # Iterate over the bounding box coordinates
-    for box in bounding_boxes:
-        # Extract the coordinates
-        x_min, y_min, x_max, y_max = box
-
-        # Convert the coordinates to integers
-        x_min = int(x_min)
-        y_min = int(y_min)
-        x_max = int(x_max)
-        y_max = int(y_max)
-
-        # Draw the bounding box on the image
-        cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
-
-    # Save the image with the bounding boxes
-    cv2.imwrite(output_path, image)
+from decimal import Decimal
+from segment_anything import sam_model_registry
 
 # gsam = GSAM()
 # gsam.extract_video_clothing(videopath, bboxes_jsonpath=bboxes_jsonpath)
