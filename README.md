@@ -38,3 +38,8 @@ python -m pip install -e segment_anything
 ```bash
 python -m pip install -e GroundingDINO
 ```
+
+#### Blending Utils
+```bash
+python -m pip install pyblur
+```
