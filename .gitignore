@@ -4,4 +4,5 @@ __pycache__
 GSAM.py.lprof
 outputs/
 slurm_outputs/
-
+GroundingDINO/groundingdino.egg-info
+segment_anything/segment_anything.egg-info
