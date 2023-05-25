@@ -119,10 +119,15 @@ class GSAM:
         image, _ = transform(image_pil, None)  # 3, h, w
         return image_pil, image
     
-    def load_bbox(self, json_filepath):
+    def load_bboxes(self, json_filepath):
         with open(json_filepath, "r") as json_file:
-            data = sjson.load(json_file)
-        return data[1]["box"]
+            data = json.load(json_file)
+        
+        new_data = {}
+        for key, value in data.items():
+            new_data[int(key)] = value['box']
+
+        return new_data
 
     @profile
     def extract_video_clothing(self, videopath, bboxes_jsonpath=None, shirt_mask_savedir=None, pant_mask_savedir=None):
@@ -143,26 +148,11 @@ class GSAM:
             if not ret: break
             shirt_mask_savepath = os.path.join(shirt_mask_savedir, f"{videoname}-{frame_i}")
             pant_mask_savepath = shirt_mask_savepath.replace(shirt_mask_savedir, pant_mask_savedir)
-
-            # if os.path.exists(shirt_mask_savepath+".png") and os.path.exists(pant_mask_savepath+".png"):
-            #     frame_i += 1
-            #     print(f"skipping {videoname}-{frame_i} (sil exists)")
-            #     # pbar.update(1)
-            #     continue
-
-            # 2. if bboxes_jsonpath is not None collect the bboxes from the path
-            if bboxes_jsonpath is not None:
-                json_filepath = os.path.join(bboxes_jsonpath, videoname+f"-{frame_i}.json")
-                if os.path.exists(json_filepath):
-                    bboxes[frame_i] = self.load_bbox(json_filepath)
-                else:
-                    frame_i += 1
-                    print(f"skipping {videoname}-{frame_i} (no json)")
-                    continue
-
             frames[frame_i] = frame
             frame_i += 1
         
+        bboxes = self.load_bboxes(bboxes_jsonpath)
+
         # 3. batched input
         for i in tqdm(range(0, len(frames), self.batch_size), desc=f"Extracting {videoname} sils"):
             batched_input = []
@@ -193,7 +183,7 @@ class GSAM:
             start_time = time.time()
             batch_output = self.sam(batched_input, multimask_output=False)
             end_time = time.time()
-            print("Execution time:", end_time - start_time, "seconds")
+            # print("Execution time:", end_time - start_time, "seconds")
 
             for frame_i, output in zip(list(frames.keys())[i: min(i+self.batch_size, len(frames))], batch_output):
                 # print(f"{frame_i = }")
@@ -212,13 +202,13 @@ class GSAM:
                 self.save_mask_data(shirt_mask_savepath, shirtmask_jsonsavepath, shirtmask[None], [shirt_bboxes[frame_i]], ["clothing"])
                 self.save_mask_data(pant_mask_savepath, pantmask_jsonsavepath, pantmask[None], [pant_bboxes[frame_i]], ["clothing"])
 
-            break
+            # break
         
 if __name__ == "__main__":
     # image_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/inputs/frame_fg.jpg"
-    video_file_dir= "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/"
-    filename = "001-bg-01-000.avi"
-    json_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/001/bg-01/000"
+    video_file_dir= "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-2/video/"
+    filename = "077-bg-01-000.avi"
+    json_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/077/bg-01/000.json"
 
     shirt_mask_savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/silhouettes-shirts/debug/"
     pant_mask_savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/silhouettes-pants/debug/"

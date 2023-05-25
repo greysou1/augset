@@ -157,7 +157,7 @@ for video_file in tqdm(video_files):
     json_path_folder = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/"
 
     person_mask_folder += f"{sub_id}/{cond}/{view_angle}"
-    json_path_folder += f"{sub_id}/{cond}/{view_angle}"
+    json_path += f"{sub_id}/{cond}/{view_angle}.json"
 
     shirt_mask_folder = person_mask_folder.replace("silhouettes", "silhouettes-shirts")
     pant_mask_folder = person_mask_folder.replace("silhouettes", "silhouettes-pants")
@@ -166,7 +166,7 @@ for video_file in tqdm(video_files):
     if not os.path.exists(pant_mask_folder): os.makedirs(pant_mask_folder, exist_ok=True)
     
     gsam.extract_video_clothing(fore_path, 
-                                json_path_folder,
+                                json_path,
                                 shirt_mask_savedir=shirt_mask_folder, 
                                 pant_mask_savedir=pant_mask_folder)
     # if not success:
