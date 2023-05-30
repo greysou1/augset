@@ -1,3 +1,4 @@
+import gc
 import cv2
 import cProfile
 from helper import *
@@ -204,7 +205,6 @@ class GSAM:
 
         return new_data
 
-    @profile
     def extract_video_clothing(self, videopath, bboxes_jsonpath=None, savedir=None):
         """
         Extract clothing bounding boxes and masks from a video.
@@ -258,12 +258,28 @@ class GSAM:
         clothing_bboxes = {}  # clothing_bboxes = {"26": {"shirtbbox": list, "pantbbox": list}}
         clothing_masks = {}   # clothing_masks  = {"26": {"shirtmask": torch.Tensor, "pantmask": torch.Tensor}}
 
+        # 4. save the data
+        # a. save the bboxes: clothing_bboxes
+        bbox_savepath = os.path.join(savedir, "clothing-jsons", sub_id, cond)
+        if not os.path.exists(bbox_savepath): os.makedirs(bbox_savepath, exist_ok=True)
+        bbox_savepath = os.path.join(bbox_savepath, view_angle+".json")
+
+        # b. save the masks:  clothing_masks
+        shirtmask_savepath = os.path.join(savedir, "silhouettes-shirts", sub_id, cond, view_angle)
+        pantmask_savepath = os.path.join(savedir, "silhouettes-pants", sub_id, cond, view_angle)
+
+        if not os.path.exists(shirtmask_savepath): os.makedirs(shirtmask_savepath, exist_ok=True)
+        if not os.path.exists(pantmask_savepath): os.makedirs(pantmask_savepath, exist_ok=True)
+
         # 3. batch inference
-        for i in tqdm(range(0, len(frames), self.batch_size), desc=f"Extracting {videoname} sils"):
+        # for i in tqdm(range(0, len(bboxes), self.batch_size), desc=f"Extracting {videoname} sils"):
+        for i in range(0, len(bboxes), self.batch_size):
             batched_input = []
             # a. create batched input
-            # frame_indices = 
-            for frame_i in sorted(list(bboxes.keys()), key=int)[i: min(i+self.batch_size, len(frames))]:
+            frame_indices = sorted(list(bboxes.keys()), key=int)[i: min(i+self.batch_size, len(frames))]
+            for frame_i in frame_indices:
+                if os.path.exists(os.path.join(shirtmask_savepath, f"{videoname}-{frame_i}.png")):
+                    continue
                 try:
                     shirt_bbox = bboxes[frame_i].copy()
                     pant_bbox = bboxes[frame_i].copy()
@@ -286,30 +302,18 @@ class GSAM:
                     }
                 )
             
+            if len(batched_input) == 0: continue
             # b. inference batched input
             batch_output = self.sam(batched_input, multimask_output=False)
+            gc.collect()
 
             # c. index batched output
-            for frame_i, output in zip(list(frames.keys())[i: min(i+self.batch_size, len(frames))], batch_output):
+            for frame_i, output in zip(frame_indices, batch_output):
                 # print(f"{frame_i = }")
                 masks, _, _ = output.values()
                 shirtmask, pantmask = masks[:2]
 
                 clothing_masks[frame_i] = {"shirtmask": shirtmask, "pantmask": pantmask}
-
-
-        # 4. save the data
-        # a. save the bboxes: clothing_bboxes
-        bbox_savepath = os.path.join(savedir, "clothing-jsons", sub_id, cond)
-        if not os.path.exists(bbox_savepath): os.makedirs(bbox_savepath, exist_ok=True)
-        bbox_savepath = os.path.join(bbox_savepath, view_angle+".json")
-
-        # b. save the masks:  clothing_masks
-        shirtmask_savepath = os.path.join(savedir, "silhouettes-shirts", sub_id, cond, view_angle)
-        pantmask_savepath = os.path.join(savedir, "silhouettes-pants", sub_id, cond, view_angle)
-
-        if not os.path.exists(shirtmask_savepath): os.makedirs(shirtmask_savepath, exist_ok=True)
-        if not os.path.exists(pantmask_savepath): os.makedirs(pantmask_savepath, exist_ok=True)
         
         savepaths = [videoname, bbox_savepath, shirtmask_savepath, pantmask_savepath]
         self.save_clothing_data(clothing_bboxes, clothing_masks, savepaths)
@@ -321,8 +325,6 @@ if __name__ == "__main__":
     filename = "077-bg-01-000.avi"
     json_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/077/bg-01/000.json"
 
-    shirt_mask_savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/silhouettes-shirts/debug/"
-    pant_mask_savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/silhouettes-pants/debug/"
     savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/" #silhouettes-pants/debug/"
 
     video_file = os.path.join(video_file_dir, filename)
