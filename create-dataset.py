@@ -159,14 +159,14 @@ print(video_files[-5:])
 gsam = GSAM(batch_size=10)
 
 t = tqdm(video_files) 
+num_threads = os.sysconf(os.sysconf_names['SC_NPROCESSORS_ONLN'])
+print("Number of threads available:", num_threads)
 
-for video_file in tqdm(video_files):
+for video_file in t:
     filename = video_file.split('.')[0] # 023-nm-01-090
     sub_id = filename.split('-')[0] # 023
     view_angle = filename.split('-')[-1] # 090
     cond = filename.replace(sub_id, '').replace(view_angle, '')[1:-1] # nm-01
-
-    # print(filename)
 
     fore_path = os.path.join(video_file_dir, video_file)
 
@@ -216,10 +216,16 @@ for video_file in tqdm(video_files):
                             shirt_color=shirt_color, pant_color=pant_color,
                             shirt_intensity=shirt_intensity, pant_intensity=pant_intensity)
 
-        thread = threading.Thread(target=create_video,args=(os.path.join(bg_path, bkgrnd),fore_path,
-                                                            masks=masks, save_path=save_path,
-                                                            shirt_color=shirt_color, pant_color=pant_color,
-                                                            shirt_intensity=shirt_intensity, pant_intensity=pant_intensity))
+        thread = threading.Thread(target=create_video, 
+                                  args=(os.path.join(bg_path, bkgrnd), fore_path),
+                                  kwargs={
+                                    "masks": masks,
+                                    "save_path": save_path,
+                                    "shirt_color": shirt_color,
+                                    "pant_color": pant_color,
+                                    "shirt_intensity": shirt_intensity,
+                                    "pant_intensity": pant_intensity
+                                })
         thread.start()
         threads.append(thread)
     
