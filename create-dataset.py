@@ -10,8 +10,31 @@ from PIL import Image
 from utils.blend_utils import *
 from utils.color_change import apply_color_filter
 
+def read_mask_videos(video_paths):
+    frames = {}
+    pe_sil_video, sh_sil_video, pa_sil_video = video_paths
+    cap_pe = cv2.VideoCapture(pe_sil_video)
+    cap_sh = cv2.VideoCapture(sh_sil_video)
+    cap_pa = cv2.VideoCapture(pa_sil_video)
+    i = 0
+    while True:
+        ret_pe, frame_pe = cap_pe.read()
+        ret_sh, frame_sh = cap_sh.read()
+        ret_pa, frame_pa = cap_pa.read()
+        
+        if not ret_pe or not ret_sh or not ret_pa: break
+        
+        frames[f"{i}"] = [frame_pe, frame_sh, frame_pa]
+        i += 1
+    
+    cap_pe.release()
+    cap_sh.release()
+    cap_pa.release()
+    
+    return frames
+
 def create_video(background_path, foreground_path,
-                 shirt_mask_folder, pant_mask_folder, person_mask_folder,
+                #  shirt_mask_folder, pant_mask_folder, person_mask_folder,
                  masks=None, shirt_color=None, pant_color=None,
                  shirt_intensity=0.15, pant_intensity=0.15,
                  save_path=''):
@@ -21,9 +44,9 @@ def create_video(background_path, foreground_path,
     cap_fg = cv2.VideoCapture(foreground_path)
     
     # find the minumum of frames
-    bg_frames = int(cap_bg.get(cv2.CAP_PROP_FRAME_COUNT))
-    fg_frames = int(cap_fg.get(cv2.CAP_PROP_FRAME_COUNT))
-    max_iter = min(bg_frames, fg_frames)
+    # bg_frames = int(cap_bg.get(cv2.CAP_PROP_FRAME_COUNT))
+    # fg_frames = int(cap_fg.get(cv2.CAP_PROP_FRAME_COUNT))
+    # max_iter = min(bg_frames, fg_frames)
     
     # open video writer
     width = int(cap_fg.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -31,7 +54,7 @@ def create_video(background_path, foreground_path,
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(save_path, fourcc, 30.0, (width, height))
 
-    i = 1
+    i = 0
     # with tqdm(total=max_iter, desc=save_path.split('/')[-1].split('.')[0]) as pbar:
     while cap_fg.isOpened():
         # ----------- read frame -----------
@@ -42,7 +65,8 @@ def create_video(background_path, foreground_path,
             break
                     
         # ----------- adjust the green tint in the CASIAB -----------
-        frame_fg = sub_color_bgr(frame_fg, b=0, g=30, r=0) # I: np.array; O: np.array
+        # frame_fg = sub_color_bgr(frame_fg, b=0, g=30, r=0) # I: np.array; O: np.array
+        frame_fg[:, :, 1] = [x-30 for x in frame_fg[:, :, 1]] # G
         # ----------- change the color of the shirt image -----------
         if shirt_color is not None:
             frame_fg_shirtcolor = apply_color_filter(frame_fg, shirt_color, intensity=shirt_intensity, RGB=False) # I: np.array; O: np.array
@@ -52,24 +76,25 @@ def create_video(background_path, foreground_path,
         videoname = foreground_path.split('/')[-1].split('.avi')[0]
         
         # ----------- read the 3 masks -----------
-        if str(i-1) in masks:
-            shirt_mask, pant_mask, person_mask = masks[str(i-1)]
+        if str(i) in masks:
+            shirt_mask, pant_mask, person_mask = masks[str(i)]
         else:
-            try:
-                shirt_mask_path = os.path.join(shirt_mask_folder, videoname+'-'+str(i-1)+'.png')
-                pant_mask_path = os.path.join(pant_mask_folder, videoname+'-'+str(i-1)+'.png')
-                person_mask_path = os.path.join(person_mask_folder, videoname+'-'+str(i-1)+'.png')  
-                shirt_mask = Image.open(shirt_mask_path).convert('L')
-                pant_mask = Image.open(pant_mask_path).convert('L')
-                person_mask = Image.open(person_mask_path).convert('L')
+            # try:
+            #     # shirt_mask_path = os.path.join(shirt_mask_folder, videoname+'-'+str(i)+'.png')
+            #     # pant_mask_path = os.path.join(pant_mask_folder, videoname+'-'+str(i)+'.png')
+            #     # person_mask_path = os.path.join(person_mask_folder, videoname+'-'+str(i)+'.png')  
+            #     # shirt_mask = Image.open(shirt_mask_path).convert('L')
+            #     # pant_mask = Image.open(pant_mask_path).convert('L')
+            #     # person_mask = Image.open(person_mask_path).convert('L')
+                
 
-                masks[str(i-1)] = [shirt_mask, pant_mask, person_mask]
-                # mask = cv2.imread(mask_path)
-            except FileNotFoundError:
-                # print(f"mask not found: {shirt_mask_path} or {pant_mask_path} or {person_mask_path}")
-                i += 1  
-                # pbar.update(1)
-                continue
+            #     masks[str(i)] = [shirt_mask, pant_mask, person_mask]
+            #     # mask = cv2.imread(mask_path)
+            # except FileNotFoundError:
+            #     # print(f"mask not found: {shirt_mask_path} or {pant_mask_path} or {person_mask_path}")
+            i += 1  
+            # pbar.update(1)
+            continue
         # ----------------------------------------
         
         # ----------- convert all images to PIL and resize to frame_fg for blending -----------
@@ -169,7 +194,7 @@ for video_file in tqdm(video_files):
     bkgrnds = random.sample(bkgrnds_full, k=10)
     shirt_colors = random.sample(colors_full, k=10)
     pant_colors = random.sample(colors_full, k=10)
-    masks = {}
+    masks = read_mask_videos([person_mask_folder, shirt_mask_folder, pant_mask_folder])
     for shirt_color, pant_color, bkgrnd in zip(shirt_colors, pant_colors, bkgrnds):
         shirt_color, shirt_intensity = shirt_color
         pant_color, pant_intensity = pant_color
@@ -187,7 +212,7 @@ for video_file in tqdm(video_files):
         t.refresh()
         
         masks = create_video(os.path.join(bg_path, bkgrnd), fore_path,
-                            shirt_mask_folder, pant_mask_folder, person_mask_folder,
+                            # shirt_mask_folder, pant_mask_folder, person_mask_folder,
                             masks=masks, save_path=save_path,
                             shirt_color=shirt_color, pant_color=pant_color,
                             shirt_intensity=shirt_intensity, pant_intensity=pant_intensity)

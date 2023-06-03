@@ -83,7 +83,18 @@ class GSAM:
 
         """
         videoname, bbox_savepath, shirtmask_savepath, pantmask_savepath = savepaths
-        
+        shirtmask_videopath = os.path.join(shirtmask_savepath, f"{videoname}.mp4")
+        pantmask_videopath = os.path.join(pantmask_savepath, f"{videoname}.mp4")
+
+        # get the shape of the first frame
+        first_frame = next(iter(clothing_masks.values()))
+        shirtmask, _ = first_frame.values()
+        frame_height, frame_width = shirtmask.shape[-2:]
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        shirtmask_video = cv2.VideoWriter(shirtmask_videopath, fourcc, 30, (frame_width, frame_height))
+        pantmask_video = cv2.VideoWriter(pantmask_videopath, fourcc, 30, (frame_width, frame_height))
+
         # ------------------------ save masks -------------------------
         for index, masks in clothing_masks.items():
             shirtmask, pantmask = masks.values()
@@ -99,12 +110,28 @@ class GSAM:
 
             shirtmask_img = (shirtmask_img * 255).byte()  # Convert to uint8
             pantmask_img = (pantmask_img * 255).byte()  # Convert to uint8
+            
+            # Convert tensors to numpy arrays
+            shirtmask_img = shirtmask_img.numpy()
+            pantmask_img = pantmask_img.numpy()
 
-            shirtmask_img_pil = Image.fromarray(shirtmask_img.numpy(), mode='L')
-            pantmask_img_pil = Image.fromarray(pantmask_img.numpy(), mode='L')
+            # Convert grayscale images to RGB
+            # shirtmask_img = cv2.cvtColor(shirtmask_img, cv2.COLOR_GRAY2RGB)
+            # pantmask_img = cv2.cvtColor(pantmask_img, cv2.COLOR_GRAY2RGB)
 
-            shirtmask_img_pil.save(os.path.join(shirtmask_savepath, f"{videoname}-{index}.png"), format='PNG')
-            pantmask_img_pil.save(os.path.join(pantmask_savepath, f"{videoname}-{index}.png"), format='PNG')
+            # Write the frames to the output video
+            shirtmask_video.write(shirtmask_img)
+            pantmask_video.write(pantmask_img)
+            
+            # shirtmask_img_pil = Image.fromarray(shirtmask_img.numpy(), mode='L')
+            # pantmask_img_pil = Image.fromarray(pantmask_img.numpy(), mode='L')
+
+            # shirtmask_img_pil.save(os.path.join(shirtmask_savepath, f"{videoname}-{index}.png"), format='PNG')
+            # pantmask_img_pil.save(os.path.join(pantmask_savepath, f"{videoname}-{index}.png"), format='PNG')
+
+        shirtmask_video.release()
+        pantmask_video.release()
+
         # -------------------------------------------------------------
         # ------------------------ save bboxes ------------------------
         json_dict = {}
@@ -331,14 +358,14 @@ if __name__ == "__main__":
 
     gsam = GSAM(batch_size=1)
 
-    profiler = cProfile.Profile()
+    # profiler = cProfile.Profile()
 
-    profiler.enable()
+    # profiler.enable()
     gsam.extract_video_clothing(video_file,
                                 json_path,
                                 savedir=savedir)
     
-    profiler.disable()
-    profiler.print_stats()
+    # profiler.disable()
+    # profiler.print_stats()
 
     
