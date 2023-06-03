@@ -1,4 +1,4 @@
-import os, yaml, glob, random
+import os, yaml, glob, random, threading
 from tqdm import tqdm
 
 import cv2
@@ -126,7 +126,7 @@ def create_video(background_path, foreground_path,
     cap_bg.release()
     out.release()
 
-    return masks
+    # return masks
 
 colors_full = [('red', 0.15), ('green', 0.12), ('blue', 0.15), ('yellow', 0.15), ('orange', 0.2),
                ('purple', 0.18), ('pink', 0.25), ('brown', 0.15), ('cyan', 0.15), ('magenta', 0.15),
@@ -188,13 +188,12 @@ for video_file in tqdm(video_files):
     gsam.extract_video_clothing(fore_path, 
                                 json_path,
                                 savedir=savedir)
-    # if not success:
-    #     print(f"{video_file} failed to extract silhouettes. skipping ...")
 
     bkgrnds = random.sample(bkgrnds_full, k=10)
     shirt_colors = random.sample(colors_full, k=10)
     pant_colors = random.sample(colors_full, k=10)
     masks = read_mask_videos([person_mask_folder, shirt_mask_folder, pant_mask_folder])
+    threads = []
     for shirt_color, pant_color, bkgrnd in zip(shirt_colors, pant_colors, bkgrnds):
         shirt_color, shirt_intensity = shirt_color
         pant_color, pant_intensity = pant_color
@@ -211,9 +210,19 @@ for video_file in tqdm(video_files):
         t.set_description(f"creating {save_path.split('/')[-1].split('.')[0]}")
         t.refresh()
         
-        masks = create_video(os.path.join(bg_path, bkgrnd), fore_path,
+        create_video(os.path.join(bg_path, bkgrnd), fore_path,
                             # shirt_mask_folder, pant_mask_folder, person_mask_folder,
                             masks=masks, save_path=save_path,
                             shirt_color=shirt_color, pant_color=pant_color,
                             shirt_intensity=shirt_intensity, pant_intensity=pant_intensity)
-    # break
+
+        thread = threading.Thread(target=create_video,args=(os.path.join(bg_path, bkgrnd),fore_path,
+                                                            masks=masks, save_path=save_path,
+                                                            shirt_color=shirt_color, pant_color=pant_color,
+                                                            shirt_intensity=shirt_intensity, pant_intensity=pant_intensity))
+        thread.start()
+        threads.append(thread)
+    
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
