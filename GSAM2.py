@@ -52,101 +52,60 @@ class GSAM:
     
     def save_clothing_data(self, clothing_bboxes, clothing_masks, savepaths):
         """
-        Save clothing bounding boxes and masks as PNG images and JSON file.
+        Saves clothing bounding box data and clothing mask frames to specified file paths.
 
         Args:
-            clothing_bboxes (dict): A dictionary containing clothing bounding boxes.
-                                Keys represent the index or ID of the clothing item,
-                                and values are dictionaries with 'shirtbox' and 'pantbox' entries.
-                                Each box is represented as a list [x, y, width, height].
-            clothing_masks (list): A list of dictionaries containing clothing masks.
-                                Each dictionary represents the masks for a clothing item,
-                                with 'shirtmask' and 'pantmask' as keys.
-                                Each mask is a tensor with shape [1, H, W].
-            savepaths (tuple): A tuple containing three save paths in the following order:
-                            - bbox_savepath: The file path to save the bounding box data as a JSON file.
-                            - shirtmask_savepath: The directory path to save the shirt masks as PNG images.
-                            - pantmask_savepath: The directory path to save the pant masks as PNG images.
+            clothing_bboxes (dict): Dictionary containing clothing bounding box data.
+                Format: {frame_index: {'label': bbox_coordinates}}
+            clothing_masks (dict): Dictionary containing clothing mask frames.
+                Format: {frame_index: {'label': mask_tensor}}
+            savepaths (tuple): Tuple containing file paths for saving bounding box data and mask videos.
+                Format: (bbox_savepath, mask_save_paths)
+            - bbox_savepath (str): File path to save bounding box data in JSON format.
+            - mask_save_paths (dict): Dictionary containing file paths for saving mask videos.
+                Format: {'label': video_savepath}
 
         Returns:
-            None: The function saves the bounding box data and mask images as files.
-
-        Notes:
-            - The function assumes that the `clothing_bboxes` and `clothing_masks` dictionaries
-            have the same keys corresponding to the clothing items.
-            - The function saves each mask as a separate PNG image in the specified directories.
-            The image files are named as 'shirtmask-{index}.png' and 'pantmask-{index}.png',
-            where 'index' corresponds to the index of the clothing item.
-            - The bounding box data is saved as a JSON file at the specified `bbox_savepath`.
-            The file contains a dictionary where keys represent the index of the clothing item,
-            and values are lists of dictionaries with 'label' (shirt or pant) and 'box' (bounding box) entries.
-
+            None
         """
-        videoname, bbox_savepath, shirtmask_savepath, pantmask_savepath = savepaths
-        shirtmask_videopath = os.path.join(shirtmask_savepath, f"{videoname}.mp4")
-        pantmask_videopath = os.path.join(pantmask_savepath, f"{videoname}.mp4")
+        bbox_savepath, mask_save_paths = savepaths
 
+        # clothing_masks[0].keys() -> "person", "shirt", "pant"
+        
         # get the shape of the first frame
-        first_frame = next(iter(clothing_masks.values()))
-        shirtmask, _ = first_frame.values()
-        frame_height, frame_width = shirtmask.shape[-2:]
+        mask = clothing_masks[0].values()[0]
+        frame_height, frame_width = mask.shape[-2:]
 
+        video_writers = {}
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        shirtmask_video = cv2.VideoWriter(shirtmask_videopath, fourcc, 30, (frame_width, frame_height))
-        pantmask_video = cv2.VideoWriter(pantmask_videopath, fourcc, 30, (frame_width, frame_height))
+        for saveitem in clothing_masks[0].keys():
+            video_writers[saveitem] = cv2.VideoWriter(mask_save_paths[saveitem], fourcc, 30, (frame_width, frame_height))
 
-        # ------------------------ save masks -------------------------
         for index, masks in clothing_masks.items():
-            shirtmask, pantmask = masks.values()
+            for mask_item, mask in masks.items():
+                mask_np = mask.cpu().numpy()[0].astype(bool).astype(int)
 
-            shirtmask_np = shirtmask.cpu().numpy()[0].astype(bool).astype(int)
-            pantmask_np = pantmask.cpu().numpy()[0].astype(bool).astype(int)
+                mask_img = torch.zeros(mask_np.shape)
+                mask_img[mask_np == 1] = 1
+                mask_img = (mask_img * 255).byte()     # Convert to uint8
+                mask_img = mask_img.numpy()            # Convert tensors to numpy arrays
 
-            shirtmask_img = torch.zeros(shirtmask_np.shape)
-            pantmask_img = torch.zeros(pantmask_np.shape)
+                # Write the frames to the output video
+                video_writers[mask_item].write(mask_img)
 
-            shirtmask_img[shirtmask_np == 1] = 1
-            pantmask_img[pantmask_np == 1] = 1
+        for video_writer in video_writers:
+            video_writer.release()
 
-            shirtmask_img = (shirtmask_img * 255).byte()  # Convert to uint8
-            pantmask_img = (pantmask_img * 255).byte()  # Convert to uint8
-            
-            # Convert tensors to numpy arrays
-            shirtmask_img = shirtmask_img.numpy()
-            pantmask_img = pantmask_img.numpy()
-
-            # Convert grayscale images to RGB
-            # shirtmask_img = cv2.cvtColor(shirtmask_img, cv2.COLOR_GRAY2RGB)
-            # pantmask_img = cv2.cvtColor(pantmask_img, cv2.COLOR_GRAY2RGB)
-
-            # Write the frames to the output video
-            shirtmask_video.write(shirtmask_img)
-            pantmask_video.write(pantmask_img)
-            
-            # shirtmask_img_pil = Image.fromarray(shirtmask_img.numpy(), mode='L')
-            # pantmask_img_pil = Image.fromarray(pantmask_img.numpy(), mode='L')
-
-            # shirtmask_img_pil.save(os.path.join(shirtmask_savepath, f"{videoname}-{index}.png"), format='PNG')
-            # pantmask_img_pil.save(os.path.join(pantmask_savepath, f"{videoname}-{index}.png"), format='PNG')
-
-        shirtmask_video.release()
-        pantmask_video.release()
-
-        # -------------------------------------------------------------
         # ------------------------ save bboxes ------------------------
         json_dict = {}
         for index, clothing_bbox in clothing_bboxes.items():
-            shirtbox, pantbox = clothing_bbox.values()
-            json_dict[index] = [
-                                    {
-                                        'label': 'shirt',
-                                        'box': shirtbox
-                                    },
-                                    {
-                                        'label': 'pant',
-                                        'box': pantbox
-                                    }
-                                ]
+            bboxes = []
+            for bbox_item, bbox in clothing_bbox.items():
+                bboxes.append({
+                    'label': bbox_item,
+                    'box': bbox
+                })
+            json_dict[index] = bboxes
 
         with open(bbox_savepath, 'w', encoding='utf-8') as f:
             json.dump(json_dict, f)
@@ -232,7 +191,7 @@ class GSAM:
 
         return new_data
 
-    def extract_video_clothing(self, videopath, bboxes_jsonpath=None, savedir=None):
+    def extract_video_masks(self, videopath, bboxes_jsonpath=None, savedir=None):
         """
         Extract clothing bounding boxes and masks from a video.
 
@@ -292,11 +251,14 @@ class GSAM:
         bbox_savepath = os.path.join(bbox_savepath, view_angle+".json")
 
         # b. save the masks:  clothing_masks
-        shirtmask_savepath = os.path.join(savedir, "silhouettes-shirts", sub_id, cond, view_angle)
-        pantmask_savepath = os.path.join(savedir, "silhouettes-pants", sub_id, cond, view_angle)
+        mask_save_paths = {}
+        mask_save_paths["person"] = os.path.join(savedir, "silhouettes-person", sub_id, cond, view_angle, f"{videoname}.png") 
+        mask_save_paths["shirt"] = os.path.join(savedir, "silhouettes-shirts", sub_id, cond, view_angle, f"{videoname}.png")
+        mask_save_paths["pant"] = os.path.join(savedir, "silhouettes-pants", sub_id, cond, view_angle, f"{videoname}.png")
 
-        if not os.path.exists(shirtmask_savepath): os.makedirs(shirtmask_savepath, exist_ok=True)
-        if not os.path.exists(pantmask_savepath): os.makedirs(pantmask_savepath, exist_ok=True)
+        for savepath in mask_save_paths.values():
+            if not os.path.exists(savepath): os.makedirs(savepath, exist_ok=True)
+        # if not os.path.exists(pantmask_savepath): os.makedirs(pantmask_savepath, exist_ok=True)
 
         # 3. batch inference
         # for i in tqdm(range(0, len(bboxes), self.batch_size), desc=f"Extracting {videoname} sils"):
@@ -305,8 +267,6 @@ class GSAM:
             # a. create batched input
             frame_indices = sorted(list(bboxes.keys()), key=int)[i: min(i+self.batch_size, len(frames))]
             for frame_i in frame_indices:
-                if os.path.exists(os.path.join(shirtmask_savepath, f"{videoname}-{frame_i}.png")):
-                    continue
                 try:
                     shirt_bbox = bboxes[frame_i].copy()
                     pant_bbox = bboxes[frame_i].copy()
@@ -320,12 +280,27 @@ class GSAM:
                 
                 pant_bbox[1] = pant_bbox[3] - (box_height / 2)        # Set the new top coordinate for the pant bounding box`
 
-                clothing_bboxes[frame_i] = {"shirtbbox": shirt_bbox, "pantbbox": pant_bbox}
+                bboxes = {}
+                # if not os.path.exists(os.path.join(mask_save_paths["person"], f"{videoname}-{frame_i}.png")):
+                if not os.path.exists(os.path.join(mask_save_paths["person"])):
+                    bboxes["person"] = bboxes[frame_i]
+                # if not os.path.exists(os.path.join(mask_save_paths["shirt"], f"{videoname}-{frame_i}.png")):
+                if not os.path.exists(os.path.join(mask_save_paths["shirt"])):
+                    bboxes["shirt"] = shirt_bbox
+                # if not os.path.exists(os.path.join(mask_save_paths["pant"], f"{videoname}-{frame_i}.png")):
+                if not os.path.exists(os.path.join(mask_save_paths["pant"])):
+                    bboxes["pant"] = pant_bbox
+                
+                if len(bboxes) == 0:
+                    continue
+                
+                clothing_bboxes[frame_i] = bboxes
+
                 batched_input.append(
                     {
                         'image': torch.as_tensor(frames[frame_i], device=self.sam.device).permute(2, 0, 1).contiguous(),
                         'original_size': frames[frame_i].shape[:2],
-                        'boxes': torch.as_tensor([shirt_bbox, pant_bbox], device=self.sam.device)
+                        'boxes': torch.as_tensor(clothing_bboxes[frame_i].values(), device=self.sam.device)
                     }
                 )
             
@@ -333,17 +308,23 @@ class GSAM:
             # b. inference batched input
             batch_output = self.sam(batched_input, multimask_output=False)
             gc.collect()
-
+            
             # c. index batched output
             for frame_i, output in zip(frame_indices, batch_output):
                 # print(f"{frame_i = }")
                 masks, _, _ = output.values()
-                shirtmask, pantmask = masks[:2]
-
-                clothing_masks[frame_i] = {"shirtmask": shirtmask, "pantmask": pantmask}
+                # personmask, shirtmask, pantmask = masks[:3]
+                masks_dict = {}
+                for mask_name, mask_item in zip(clothing_bboxes[frame_i].keys(), masks[:len(clothing_bboxes[frame_i])]):
+                    masks_dict[mask_name] = mask_item
+                    # {"personmask": personmask,
+                    #  "shirtmask": shirtmask,
+                    #  "pantmask": pantmask}
+                
+                clothing_masks[frame_i] = masks_dict
         
-        savepaths = [videoname, bbox_savepath, shirtmask_savepath, pantmask_savepath]
-        self.save_clothing_data(clothing_bboxes, clothing_masks, savepaths)
+        savepaths = [bbox_savepath, mask_save_paths]
+        self.save_clothing_data2(clothing_bboxes, clothing_masks, savepaths)
 
 if __name__ == "__main__":
     # image_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/inputs/frame_fg.jpg"
