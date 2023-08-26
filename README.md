@@ -44,6 +44,7 @@ python -m pip install -e GroundingDINO
 python -m pip install pyblur
 ```
 
+[Update pyblur](https://github.com/lospooky/pyblur/issues/5#issue-309942237)
 
 ## Pre-Trained Weights
 ```
