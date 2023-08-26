@@ -29,29 +29,29 @@ def apply_color_filter(image, color_name, intensity=0.5, RGB=False):
     if color_name.lower() not in colors:
         print(f"Invalid color name '{color_name}'. Please choose from {', '.join(colors.keys())}.")
         return
-
-    # Get the desired color
+    
     color = colors[color_name.lower()]
     if RGB:
         color = color[::-1]
-    # Create a color filter by duplicating the color across the image dimensions
+    # create a color filter by duplicating the color across the image dimensions
     color_filter = np.full_like(image, color)
 
-    # Apply the color filter to the image by blending the original and filtered image
+    # apply the color filter to the image by blending the original and filtered image
     filtered_image = cv2.addWeighted(image, 1 - intensity, color_filter, intensity, 0)
 
     return filtered_image
 
 if __name__ == "__main__":
     # Load image
-    image_path = 'images/frame_fg.jpg'
+    image_path = '/home/prudvik/id-dataset/Grounded-Segment-Anything/inputs/frame_fg.jpg'
     image = cv2.imread(image_path)
+
+    # filename = "002_01"
+    # video_file = f"/home/c3-0/datasets/FVG_RGB_vid/session1/{filename}.mp4"
+    # f = cv2.VideoCapture(video_file)
+    # _, image = f.read()
 
     # Apply a red color filter
     filtered_image = apply_color_filter(image, 'red')
 
-    # Display the original and filtered images
-    cv2.imshow('Original Image', image)
-    cv2.imshow('Filtered Image', filtered_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    cv2.imwrite('/home/prudvik/id-dataset/dataset-augmentation/outputs/color/filtered_image_casiab.jpg', filtered_image)

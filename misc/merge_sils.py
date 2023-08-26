@@ -16,12 +16,14 @@ def convert_folder_to_video(folder_path):
 
     # Read the first image to get the size
     first_image = cv2.imread(os.path.join(folder_path, image_files[0]))
-    height, width, channels = first_image.shape
+    height, width, _ = first_image.shape
 
-    # Define the video writer
     video_file = f"{folder_path}.mp4"
 
     if os.path.exists(video_file):
+        pbar.set_description(f'{video_file} exists!')
+        pbar.refresh()
+        pbar.update(1)
         return
 
     # print(folder_path,video_file)
@@ -56,12 +58,15 @@ if __name__ == "__main__":
     num_threads = os.sysconf(os.sysconf_names['SC_NPROCESSORS_ONLN'])
     print("Number of threads available:", num_threads)
 
-    main_folder = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/silhouettes"
+    main_folder = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/silhouettes-shirts"
     ids = natsort.natsorted(os.listdir(main_folder))
 
-    # start_id, end_id = 0, 40
-    # start_id, end_id = 40, 80
-    start_id, end_id = 80, 130
+    start_id, end_id = 0, 20
+    # start_id, end_id = 20, 40
+    # start_id, end_id = 40, 60
+    # start_id, end_id = 60, 80
+    # start_id, end_id = 80, 100
+    # start_id, end_id = 100, 130
 
     ids = [item for item in ids if int(item) > start_id]
     ids = [item for item in ids if int(item) <= end_id]
@@ -74,6 +79,6 @@ if __name__ == "__main__":
             for cond in os.listdir(os.path.join(main_folder, id)):
                 folder_path = os.path.join(main_folder, id, cond)
                 process_folders(folder_path)
-                pbar.set_description(f'pants-{id}-{cond}')
+                pbar.set_description(f'shirts-{id}-{cond}')
                 pbar.refresh()
                 pbar.update(1)

@@ -87,9 +87,11 @@ class GSAM:
         pantmask_videopath = os.path.join(pantmask_savepath, f"{videoname}.mp4")
 
         # get the shape of the first frame
+        # print(clothing_masks.values())
         first_frame = next(iter(clothing_masks.values()))
         shirtmask, _ = first_frame.values()
-        frame_height, frame_width = shirtmask.shape[-2:]
+        print(shirtmask.shape)
+        frame_height, frame_width = shirtmask[0].shape
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         shirtmask_video = cv2.VideoWriter(shirtmask_videopath, fourcc, 30, (frame_width, frame_height))
@@ -123,11 +125,11 @@ class GSAM:
             shirtmask_video.write(shirtmask_img)
             pantmask_video.write(pantmask_img)
             
-            # shirtmask_img_pil = Image.fromarray(shirtmask_img.numpy(), mode='L')
-            # pantmask_img_pil = Image.fromarray(pantmask_img.numpy(), mode='L')
+            shirtmask_img_pil = Image.fromarray(shirtmask_img, mode='L')
+            pantmask_img_pil = Image.fromarray(pantmask_img, mode='L')
 
-            # shirtmask_img_pil.save(os.path.join(shirtmask_savepath, f"{videoname}-{index}.png"), format='PNG')
-            # pantmask_img_pil.save(os.path.join(pantmask_savepath, f"{videoname}-{index}.png"), format='PNG')
+            shirtmask_img_pil.save(os.path.join(shirtmask_savepath, f"{videoname}-{index}.png"), format='PNG')
+            pantmask_img_pil.save(os.path.join(pantmask_savepath, f"{videoname}-{index}.png"), format='PNG')
 
         shirtmask_video.release()
         pantmask_video.release()
@@ -228,6 +230,7 @@ class GSAM:
         
         new_data = {}
         for key, value in data.items():
+            # print(key)
             new_data[int(key)] = value['box']
 
         return new_data
@@ -268,7 +271,7 @@ class GSAM:
 
         cap = cv2.VideoCapture(videopath)
         total_iterations = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_i = 0
+        frame_i = 1
         
         # 1. read all frames
         frames = {}
@@ -276,8 +279,14 @@ class GSAM:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret: break
+            scaling_factor = 0.5
+            desired_width = int(frame.shape[1] * scaling_factor)
+            desired_height = int(frame.shape[0] * scaling_factor)
+            frame = cv2.resize(frame, (desired_width, desired_height), interpolation=cv2.INTER_LINEAR)
             frames[frame_i] = frame
+            # cv2.imwrite("outputs/debug/resized_frame.jpg", frame)
             frame_i += 1
+            # break
         
         # 2. load bboxes
         bboxes = self.load_bboxes(bboxes_jsonpath)
@@ -300,13 +309,13 @@ class GSAM:
 
         # 3. batch inference
         # for i in tqdm(range(0, len(bboxes), self.batch_size), desc=f"Extracting {videoname} sils"):
-        for i in range(0, len(bboxes), self.batch_size):
+        for i in tqdm(range(0, len(bboxes), self.batch_size)):
             batched_input = []
             # a. create batched input
             frame_indices = sorted(list(bboxes.keys()), key=int)[i: min(i+self.batch_size, len(frames))]
             for frame_i in frame_indices:
-                if os.path.exists(os.path.join(shirtmask_savepath, f"{videoname}-{frame_i}.png")):
-                    continue
+                # if os.path.exists(os.path.join(shirtmask_savepath, f"{videoname}-{frame_i}.png")):
+                #     continue
                 try:
                     shirt_bbox = bboxes[frame_i].copy()
                     pant_bbox = bboxes[frame_i].copy()
@@ -315,12 +324,18 @@ class GSAM:
 
                 box_height = bboxes[frame_i][3] - bboxes[frame_i][1]  # Calculate the original height of the bounding box
 
-                shirt_bbox[3] = shirt_bbox[1] + (box_height / 2)      # Set the new bottom coordinate for the shirt bounding box
-                shirt_bbox[1] = shirt_bbox[1] + (0.15*box_height)     # Set the new top coordinate for the shirt bounding box
-                
-                pant_bbox[1] = pant_bbox[3] - (box_height / 2)        # Set the new top coordinate for the pant bounding box`
+                shirt_bbox[1] = shirt_bbox[1] + int(0.15*box_height)     # Set the new top coordinate for the shirt bounding box
+                shirt_bbox[3] = shirt_bbox[1] + int(box_height*0.3)      # Set the new bottom coordinate for the shirt bounding box
+
+                pant_bbox[1] = pant_bbox[3] - int(box_height*0.6)        # Set the new top coordinate for the pant bounding box`
 
                 clothing_bboxes[frame_i] = {"shirtbbox": shirt_bbox, "pantbbox": pant_bbox}
+                # print(frames[frame_i].shape)
+                # print(frame_i, bboxes[frame_i], shirt_bbox, pant_bbox)
+                bboxes[frame_i] = [item*scaling_factor for item in bboxes[frame_i]]
+                shirt_bbox = [item*scaling_factor for item in shirt_bbox]
+                pant_bbox = [item*scaling_factor for item in pant_bbox]
+                # transformed_boxes = self.predictor.transform.apply_boxes_torch(combined_boxes_filt, image.shape[:2]).to(self.device)
                 batched_input.append(
                     {
                         'image': torch.as_tensor(frames[frame_i], device=self.sam.device).permute(2, 0, 1).contiguous(),
@@ -340,18 +355,34 @@ class GSAM:
                 masks, _, _ = output.values()
                 shirtmask, pantmask = masks[:2]
 
+                ###========================== debug ==========================
+                # masknp = pantmask.cpu().numpy()[0].astype(bool).astype(int)
+                # maskimg = torch.zeros(masknp.shape)
+                # maskimg[masknp == 1] = 1
+                # maskimg = (maskimg * 255).byte()  # Convert to uint8
+                # maskimg = maskimg.numpy()
+                # image = Image.fromarray(maskimg, mode='L')
+                # image.save('outputs/debug/pant_maskimg.png')
+                ###========================== debug ==========================
+
                 clothing_masks[frame_i] = {"shirtmask": shirtmask, "pantmask": pantmask}
         
+            # break
         savepaths = [videoname, bbox_savepath, shirtmask_savepath, pantmask_savepath]
         self.save_clothing_data(clothing_bboxes, clothing_masks, savepaths)
 
 if __name__ == "__main__":
-    # image_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/inputs/frame_fg.jpg"
-    video_file_dir= "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-2/video/"
-    filename = "077-bg-01-000.avi"
-    json_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/077/bg-01/000.json"
+    ## FVG
+    video_file_dir= "/home/c3-0/datasets/FVG_RGB_vid/session1/"
+    filename = "002_01.mp4"
+    json_path = "/home/c3-0/datasets/FVG_GSAM_sill/session1/json/002_01.json"
+    savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/fvg" #silhouettes-pants/debug/"
 
-    savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/" #silhouettes-pants/debug/"
+    ## CASIA-B 
+    # video_file_dir= "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/"
+    # filename = "001-bg-01-000.avi"
+    # json_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/001/bg-01/000.json"
+    # savedir = "/home/prudvik/id-dataset/dataset-augmentation/outputs/casiab"
 
     video_file = os.path.join(video_file_dir, filename)
 

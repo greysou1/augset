@@ -8,6 +8,14 @@ from decimal import Decimal
 from segment_anything import sam_model_registry
 import moviepy.video.io.ImageSequenceClip
 
+# from mmcv.fileio import FileClient
+# import decord
+# import io as inio
+# from PIL import Image
+# num_threads=1
+# io_backend='disk'
+# file_client = FileClient(io_backend)
+
 # gsam = GSAM()
 # gsam.extract_video_clothing(videopath, bboxes_jsonpath=bboxes_jsonpath)
 #     -> if bboxes_jsonpath is None:
@@ -22,6 +30,12 @@ import moviepy.video.io.ImageSequenceClip
 #                     'boxes': torch.as_tensor([shirts_bboxes[i], pants_bboxes[i]], device=sam.device)
 #                 }
 #     -> self.sam(batched_input)
+
+# def load_video(video_path):
+#     file_obj = inio.BytesIO(file_client.get(video_path))
+#     container = decord.VideoReader(file_obj, num_threads=num_threads)
+#     clip = [img.asnumpy() for img in container]
+#     return clip 
 
 class GSAM:
     def __init__(self, 
@@ -73,12 +87,27 @@ class GSAM:
             data = json.load(json_file)
         
         new_data = {}
+
         for key, value in data.items():
             new_data[int(key)] = value['box']
 
         return new_data
+    
+    def load_clothingbboxes(self, json_filepath):
+        with open(json_filepath, "r") as json_file:
+            data = json.load(json_file)
+        
+        new_data = {}
+        for key, item in data["pose_data"].items():
+            new_data[int(key)] = {}
+            new_data[int(key)]['torso_bb'] = [item for sublist in item['torso_bb'] for item in sublist]
+            new_data[int(key)]['pants_bb'] = [item for sublist in item['pants_bb'] for item in sublist]
 
-    def extract_video_masks(self, videopath, bboxes_jsonpath=None, savedir=None):
+        return new_data
+
+    def extract_video_masks(self, videopath, 
+                            personbboxes_jsonpath=None, 
+                            clothingbboxes_jsonpath=None, savedir=None):
         """
         Extract clothing bounding boxes and masks from a video.
 
@@ -114,16 +143,20 @@ class GSAM:
 
         cap = cv2.VideoCapture(videopath)
 
+        if not cap.isOpened():
+            print("Could not read video", videopath)
+            return
+
         # 1. read all frames
         frame_i = 1
         frames = {}
         batched_input = []
-
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
+
             scaling_factor = 0.5
             desired_width = int(frame.shape[1] * scaling_factor)
             desired_height = int(frame.shape[0] * scaling_factor)
@@ -132,12 +165,13 @@ class GSAM:
             # cv2.imwrite("outputs/debug/resized_frame.jpg", frame)
             frame_i += 1
         
-        # 2. load bboxes
-        bboxes = self.load_bboxes(bboxes_jsonpath)
+        cap.release()
 
+        # 2. load bboxes
+        personbboxes = self.load_bboxes(personbboxes_jsonpath)
+        clothingbboxes = self.load_clothingbboxes(clothingbboxes_jsonpath)
         clothing_bboxes = {}  # clothing_bboxes = {"26": {"shirtbbox": list, "pantbbox": list}}
         clothing_masks = {}   # clothing_masks  = {"26": {"shirtmask": torch.Tensor, "pantmask": torch.Tensor}}
-
         # 4. save the data
         # a. save the bboxes: clothing_bboxes
         bbox_savepath = os.path.join(savedir, "clothing-jsons")
@@ -152,40 +186,29 @@ class GSAM:
             mask_save_fol_paths[item] = savepath
 
         # 3. batch inference
-        for i in tqdm(range(0, len(bboxes), self.batch_size)):
+        for i in tqdm(range(0, len(clothingbboxes), self.batch_size)):
+            # print(i)
             batched_input = []
             # a. create batched input
-            frame_indices = sorted(list(bboxes.keys()), key=int)[i: min(i+self.batch_size, len(frames))]
-
-            shirt_top = 0.15
-            shirt_bot = 0.4
-            pant_top = 0.6
-            
+            frame_indices = sorted(list(clothingbboxes.keys()), key=int)[i: min(i+self.batch_size, len(frames))]
             for frame_i in frame_indices:
-                shirt_bbox = bboxes[frame_i].copy()
-                pant_bbox = bboxes[frame_i].copy()
+                if frame_i in clothingbboxes:
+                    shirt_bbox = clothingbboxes[frame_i]["torso_bb"]
+                    pant_bbox = clothingbboxes[frame_i]["pants_bb"]
+                else:
+                    continue
 
-                box_height = bboxes[frame_i][3] - bboxes[frame_i][1]  # Calculate the original height of the bounding box
-
-                shirt_bbox[1] = shirt_bbox[1] + int(box_height*shirt_top)     # Set the new top coordinate for the shirt bounding box
-                shirt_bbox[3] = shirt_bbox[1] + int(box_height*shirt_bot)      # Set the new bottom coordinate for the shirt bounding box
-                pant_bbox[1] = pant_bbox[3] - int(box_height*pant_top)        # Set the new top coordinate for the pant bounding box`
-                
                 bboxes_t = {}
 
                 for item in self.mask_names:
-                    # print(frame_i, item)
-                    # print(len(clothing_bboxes), len(bboxes_t))
-                    # print(clothing_bboxes.keys(), bboxes_t.keys())
                     if item == "person":
-                        bboxes_t["person"] = [item*scaling_factor for item in bboxes[frame_i]]
+                        bboxes_t["person"] = [item*scaling_factor for item in personbboxes[frame_i]]
                     elif item == "shirt":
                         bboxes_t["shirt"] = [item*scaling_factor for item in shirt_bbox]
                     elif item == "pant":
                         bboxes_t["pant"] = [item*scaling_factor for item in pant_bbox]
 
                 clothing_bboxes[frame_i] = bboxes_t
-
                 batched_input.append(
                     {
                         'image': torch.as_tensor(frames[frame_i], device=self.sam.device).permute(2, 0, 1).contiguous(),
@@ -233,9 +256,8 @@ class GSAM:
         bbox_savepath, mask_save_paths_vid = savepaths
 
         # clothing_masks[0].keys() -> "person", "shirt", "pant"
-        
-        mask = list(clothing_masks[1].values())[0]
-        frame_height, frame_width = mask.shape[-2:]
+        # mask = list(clothing_masks[1].values())[0]
+        # frame_height, frame_width = mask.shape[-2:]
 
         image_list = {}
         image_list["person"] = []
@@ -252,7 +274,9 @@ class GSAM:
                 mask_img = mask_img.numpy()            # Convert tensors to numpy arrays
                 
                 mask_img = cv2.cvtColor(mask_img, cv2.COLOR_GRAY2BGR)
-
+                
+                if mask_item == "shirt":
+                    cv2.imwrite("outputs/debug.png", mask_img)
                 # Write the frames to the output video
                 image_list[mask_item].append(mask_img)
                 
@@ -260,7 +284,10 @@ class GSAM:
         
         for mask_name in self.mask_names:
             clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(image_list[mask_name], fps=fps)
-            clip.write_videofile(os.path.join(mask_save_paths_vid[mask_name]), f"{videoname}.mp4")
+            b = videoname.split("-")
+            clip_savepath = os.path.join(mask_save_paths_vid[mask_name], f"{b[0]}/{b[1]}-{b[2]}/{b[3]}.mp4")
+            os.makedirs(os.path.dirname(clip_savepath), exist_ok=True)
+            clip.write_videofile(clip_savepath, fps=fps, codec="libx264")
         
         # ------------------------ save bboxes ------------------------
         json_dict = {}
@@ -277,24 +304,66 @@ class GSAM:
             json.dump(json_dict, f)
         # -------------------------------------------------------------
 
-if __name__ == "__main__":
-    # image_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/inputs/frame_fg.jpg" 
-    
-    video_file_dir= "/home/c3-0/datasets/FVG_RGB_vid/session1/"
-    json_dir = "/home/c3-0/datasets/FVG_GSAM_sill/session1/json/"
-
-    savedir = "outputs/fvg" #silhouettes-pants/debug/"
-    
+if __name__ == "__main__":    
     gsam = GSAM(batch_size=1, 
-                mask_names=["person", "shirt", "pant"])
+                mask_names=["shirt", "pant", "person"])
     
-    filename = "002_01"
+    ## CASIA-B 
+    filenames = ['001-nm-04-144', '082-nm-03-054', '082-nm-05-180', '082-nm-03-090', '082-nm-03-072',
+                 '082-nm-03-180', '001-nm-04-162', '082-nm-02-036', '001-nm-04-054', '001-nm-03-018', 
+                 '026-nm-05-000', '082-nm-03-126', '001-nm-04-018', '082-nm-02-054', '082-nm-05-018', 
+                 '084-bg-01-108', '001-nm-03-000', '069-cl-01-018', '084-bg-01-018', '001-bg-02-126', 
+                 '082-nm-02-018', '082-nm-05-000', '001-nm-04-036', '084-bg-01-072', '001-nm-03-036', 
+                 '021-nm-06-162', '001-nm-03-162', '082-nm-03-144', '001-nm-03-180', '084-bg-01-000', 
+                 '026-nm-05-162', '082-nm-03-000', '082-nm-02-180', '082-nm-03-036', '001-nm-03-054', 
+                 '063-nm-01-162', '001-nm-04-000', '001-nm-03-144', '082-nm-02-126', '082-nm-05-162', 
+                 '084-bg-01-180', '082-nm-03-108', '084-bg-01-144', '082-nm-05-054', '082-nm-02-144', 
+                 '026-nm-05-180', '084-bg-01-162', '022-nm-05-162', '001-nm-04-180', '082-nm-05-144', 
+                 '082-nm-03-018', '082-nm-02-000', '082-nm-02-072', '082-nm-02-090', '084-bg-01-054', 
+                 '110-cl-02-126', '082-nm-05-036', '082-nm-02-108', '082-nm-03-162', '082-nm-02-162']
+    
+    filenames = ["064-nm-05-144",
+                 "077-nm-02-126",
+                 "107-nm-05-108",
+                 "107-cl-02-072",
+                 "094-nm-05-090",
+                 "087-bg-02-018",
+                 "074-nm-04-036",
+                 "074-nm-06-018",
+                 "097-nm-02-018",
+                 "084-cl-02-162",
+                 "110-nm-06-108",
+                 "120-bg-02-180",
+                 "086-nm-03-036",
+                 "112-nm-02-144",
+                 "095-nm-01-000",
+                 "071-nm-02-072",
+                 "098-nm-05-162",
+                 "115-nm-01-126",
+                 "123-cl-02-000",
+                 "085-bg-02-036",
+                 "078-nm-01-054",
+                 "102-nm-03-144",
+                 "082-bg-02-000"]
 
-    video_file = os.path.join(video_file_dir, filename + ".mp4")
-    json_path = os.path.join(json_dir, filename + ".json")
+    for filename in filenames:
+        print(filename)
+        if int(filename.split("-")[0]) < 62:
+            video_file = f"/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/{filename}.avi"
+        else:
+            video_file = f"/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-2/video/{filename}.avi"
 
-    # profiler = cProfile.Profile()
-    # profiler.enable()
-    gsam.extract_video_masks(video_file, json_path, savedir=savedir)
-    # profiler.disable()
-    # profiler.print_stats()
+        b = filename.split("-")
+        personbboxes_jsonpath = f"/home/prudvik/id-dataset/metadata/casiab/jsons/person/{b[0]}/{b[1]}-{b[2]}/{b[3]}.json"
+        clothingbboxes_jsonpath = f"/home/prudvik/id-dataset/pose-detection/jsonoutputs/{filename}_output.json"
+        
+        save_root = "/home/c3-0/datasets/casiab-ID-dataset/metadata/silhouettes2"
+        personbboxes_jsonpath = f"/home/c3-0/datasets/casiab-ID-dataset/metadata/jsons/person/{b[0]}/{b[1]}-{b[2]}/{b[3]}.json"
+        clothingbboxes_jsonpath = f"/home/prudvik/id-dataset/pose-detection/jsonoutputs/casiab/{b[0]}-{b[1]}-{b[2]}-{b[3]}.json"
+        
+        savedir = "outputs/casiab/casiab60"
+
+        gsam.extract_video_masks(video_file,
+                                 savedir=savedir,
+                                 personbboxes_jsonpath=personbboxes_jsonpath,
+                                 clothingbboxes_jsonpath=clothingbboxes_jsonpath)

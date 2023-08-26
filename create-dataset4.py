@@ -1,21 +1,48 @@
-import os, yaml, glob, random, threading
+import os, yaml, glob, random, threading, json, time
 from tqdm import tqdm
 
 import cv2
 import numpy as np
 
-from GSAM import GSAM
+from mmcv.fileio import FileClient
+import decord
+import io as inot
 
 from PIL import Image
 from utils.blend_utils import *
 from utils.color_change import apply_color_filter
 
-def read_mask_videos(video_paths):
+# hog = cv2.HOGDescriptor()
+# hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+# ************************
+# changed the video loader library
+# ************************
+
+num_threads=1
+io_backend='disk'
+file_client = FileClient(io_backend)
+
+def load_json(json_path):
+    return json.load(open(json_path))
+
+def save_json(data, json_file_path):
+    with open(json_file_path, "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+def read_mask_videos(video_paths, person_json_path):
     frames = {}
+    data = load_json(person_json_path)
+    json_data = data["bboxes"]
+    clean_sil_indices = data["clean_sil_indices"]
+    # clean_sil_indices = [str(a) for a in clean_sil_indices]
+    keys = sorted(list(json_data.keys()), key=int)
+
     pe_sil_video, sh_sil_video, pa_sil_video = video_paths
     cap_pe = cv2.VideoCapture(pe_sil_video)
     cap_sh = cv2.VideoCapture(sh_sil_video)
     cap_pa = cv2.VideoCapture(pa_sil_video)
+
     i = 0
     while True:
         ret_pe, frame_pe = cap_pe.read()
@@ -23,15 +50,27 @@ def read_mask_videos(video_paths):
         ret_pa, frame_pa = cap_pa.read()
         
         if not ret_pe or not ret_sh or not ret_pa: break
-        
-        frames[f"{i}"] = [frame_pe, frame_sh, frame_pa]
+        if int(keys[i]) in clean_sil_indices:
+            frame_pe = Image.fromarray(cv2.cvtColor(frame_pe, cv2.COLOR_BGR2GRAY))
+            frame_sh = Image.fromarray(cv2.cvtColor(frame_sh, cv2.COLOR_BGR2GRAY))
+            frame_pa = Image.fromarray(cv2.cvtColor(frame_pa, cv2.COLOR_BGR2GRAY))
+
+            frames[f"{keys[i]}"] = [frame_pe, frame_sh, frame_pa]
         i += 1
     
+        
     cap_pe.release()
     cap_sh.release()
     cap_pa.release()
     
     return frames
+
+def load_video(video_path):
+    file_obj = inot.BytesIO(file_client.get(video_path))
+    container = decord.VideoReader(file_obj, num_threads=num_threads)
+    # clip = [Image.fromarray(img.asnumpy()) for img in container]
+    container = [img.asnumpy() for img in container]
+    return container 
 
 def create_video(background_path, foreground_path,
                 #  shirt_mask_folder, pant_mask_folder, person_mask_folder,
@@ -43,27 +82,24 @@ def create_video(background_path, foreground_path,
     cap_bg = cv2.VideoCapture(background_path)
     cap_fg = cv2.VideoCapture(foreground_path)
     
-    # find the minumum of frames
-    # bg_frames = int(cap_bg.get(cv2.CAP_PROP_FRAME_COUNT))
-    # fg_frames = int(cap_fg.get(cv2.CAP_PROP_FRAME_COUNT))
-    # max_iter = min(bg_frames, fg_frames)
-    
     # open video writer
     width = int(cap_fg.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap_fg.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(save_path, fourcc, 30.0, (width, height))
 
+    container = load_video(foreground_path)
     i = 0
     # with tqdm(total=max_iter, desc=save_path.split('/')[-1].split('.')[0]) as pbar:
-    while cap_fg.isOpened():
+    # while cap_fg.isOpened():
+    for frame_fg in container:
         # ----------- read frame -----------
-        ret_bg, frame_bg = cap_bg.read()
-        ret_fg, frame_fg = cap_fg.read()
+        # ret_fg, frame_fg = cap_fg.read()
+        # print(i)
+        # frame_fg = container[i]
+        # if not ret_fg:
+        #     break
         
-        if not ret_fg or not ret_bg:
-            break
-                    
         # ----------- adjust the green tint in the CASIAB -----------
         # frame_fg = sub_color_bgr(frame_fg, b=0, g=30, r=0) # I: np.array; O: np.array
         # frame_fg[:, :, 1] = [x-30 for x in frame_fg[:, :, 1]] # G
@@ -77,26 +113,15 @@ def create_video(background_path, foreground_path,
         
         # ----------- read the 3 masks -----------
         if str(i) in masks:
-            shirt_mask, pant_mask, person_mask = masks[str(i)]
+            person_mask, shirt_mask, pant_mask = masks[str(i)]
         else:
-            # try:
-            #     # shirt_mask_path = os.path.join(shirt_mask_folder, videoname+'-'+str(i)+'.png')
-            #     # pant_mask_path = os.path.join(pant_mask_folder, videoname+'-'+str(i)+'.png')
-            #     # person_mask_path = os.path.join(person_mask_folder, videoname+'-'+str(i)+'.png')  
-            #     # shirt_mask = Image.open(shirt_mask_path).convert('L')
-            #     # pant_mask = Image.open(pant_mask_path).convert('L')
-            #     # person_mask = Image.open(person_mask_path).convert('L')
-                
-
-            #     masks[str(i)] = [shirt_mask, pant_mask, person_mask]
-            #     # mask = cv2.imread(mask_path)
-            # except FileNotFoundError:
-            #     # print(f"mask not found: {shirt_mask_path} or {pant_mask_path} or {person_mask_path}")
             i += 1  
-            # pbar.update(1)
             continue
         # ----------------------------------------
         
+        ret_bg, frame_bg = cap_bg.read()
+        if not ret_bg: break
+
         # ----------- convert all images to PIL and resize to frame_fg for blending -----------
         frame_fg = Image.fromarray(frame_fg)
         frame_bg = Image.fromarray(frame_bg)
@@ -116,7 +141,7 @@ def create_video(background_path, foreground_path,
         # change the color of the pant using the pant mask
         frame_fg = blend(frame_fg, frame_fg_pantcolor, pant_mask)
         # change the background 
-        frame_bg = blend(frame_bg, frame_fg, person_mask) 
+        frame_bg = blend(frame_bg, frame_fg, person_mask)
 
         out.write(np.array(frame_bg))
         i += 1
@@ -135,14 +160,23 @@ colors_full = [('red', 0.15), ('green', 0.12), ('blue', 0.15), ('yellow', 0.15),
 
 bg_path = "/home/prudvik/id-dataset/dataset-backgrounds"
 bkgrnds_full = glob.glob(os.path.join(bg_path, "*.mp4"))
+ignore_bkgrnds = ["b38.mp4", "b44.mp4", "b26.mp4", "b61.mp4", "b17.mp4", "b7.mp4", "b56.mp4", "b33.mp4",
+                  "b53.mp4", "b48.mp4", "b37.mp4", "b48.mp4", "b43.mp4"] # duplicates
+ignore_bkgrnds = [os.path.join(bg_path, item) for item in ignore_bkgrnds]
+bkgrnds_full = [bg_item for bg_item in bkgrnds_full if bg_item not in ignore_bkgrnds]
 
 
-# start_id, end_id = 0, 20
+# save_root = "/home/prudvik/id-dataset/dataset-augmentation/outputs/test-Y1-dump/"
+save_root = "/home/prudvik/id-dataset/dataset-augmentation/outputs/debug-videoreading/"
+
+k = 5 # dump_copies
+
+start_id, end_id = 00, 2
 # start_id, end_id = 20, 40
 # start_id, end_id = 40, 62
 # start_id, end_id = 62, 80
 # start_id, end_id = 80, 100
-start_id, end_id = 100, 150
+# start_id, end_id = 100, 150
 
 if start_id < 62:
     video_file_dir= "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/"
@@ -156,7 +190,7 @@ video_files = [item for item in video_files if int(item.split('-')[0]) <= end_id
 print(video_files[:5])
 print(video_files[-5:])
 
-gsam = GSAM(batch_size=10)
+# gsam = GSAM(batch_size=10)
 
 t = tqdm(video_files) 
 num_threads = os.sysconf(os.sysconf_names['SC_NPROCESSORS_ONLN'])
@@ -168,54 +202,60 @@ for video_file in t:
     view_angle = filename.split('-')[-1] # 090
     cond = filename.replace(sub_id, '').replace(view_angle, '')[1:-1] # nm-01
 
+    # print(filename)
+    if cond != 'nm-04' or view_angle != '144' or sub_id != "001": continue
+    if cond == 'bkgrd': continue
+    
     fore_path = os.path.join(video_file_dir, video_file)
 
-    person_mask_folder = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/silhouettes/"
-    json_path = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/json/"
-    savedir = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs"
+    person_mask_folder = "/home/c3-0/datasets/casiab-ID-dataset/metadata/silhouettes/person/"
+    person_json_path = "/home/c3-0/datasets/casiab-ID-dataset/metadata/jsons2/person/"
 
-    person_mask_folder += f"{sub_id}/{cond}/{view_angle}"
-    json_path += f"{sub_id}/{cond}/{view_angle}.json"
+    person_mask_folder += f"{sub_id}/{cond}/{view_angle}.mp4"
+    person_json_path += f"{sub_id}/{cond}/{view_angle}.json"
 
-    shirt_mask_folder = person_mask_folder.replace("silhouettes", "silhouettes-shirts")
-    pant_mask_folder = person_mask_folder.replace("silhouettes", "silhouettes-pants")
-
-    # if not os.path.exists(shirt_mask_folder): os.makedirs(shirt_mask_folder, exist_ok=True)
-    # if not os.path.exists(pant_mask_folder): os.makedirs(pant_mask_folder, exist_ok=True)
     
-    t.set_description(f"Extracting {filename} sils")
-    t.refresh()
-    gsam.extract_video_clothing(fore_path, 
-                                json_path,
-                                savedir=savedir)
+    shirt_mask_folder = person_mask_folder.replace("person", "shirt")
+    pant_mask_folder = person_mask_folder.replace("person", "pant")
 
-    bkgrnds = random.sample(bkgrnds_full, k=10)
-    shirt_colors = random.sample(colors_full, k=10)
-    pant_colors = random.sample(colors_full, k=10)
-    masks = read_mask_videos([person_mask_folder, shirt_mask_folder, pant_mask_folder])
+    shirt_mask_folder = "/home/prudvik/id-dataset/dataset-augmentation/outputs/debug-masks/001-nm-04-144.mp4"
+
+    bkgrnds = random.sample(bkgrnds_full, k=k)
+    shirt_colors = random.sample(colors_full, k=k)
+    pant_colors = random.sample(colors_full, k=k)
+
+    save_path = os.path.join(save_root, f"{sub_id}/{cond}/{view_angle}/")
+        
+    if not os.path.exists(save_path):
+        os.makedirs(save_path, exist_ok=True)
+
+    if len(os.listdir(save_path)) >= k:
+        continue
+    # s = time.time()
+    masks = read_mask_videos([person_mask_folder, shirt_mask_folder, pant_mask_folder], person_json_path)
+    # print(f"Read_masks time {time.time() - s}")
     threads = []
     for shirt_color, pant_color, bkgrnd in zip(shirt_colors, pant_colors, bkgrnds):
         shirt_color, shirt_intensity = shirt_color
         pant_color, pant_intensity = pant_color
 
-        save_path = f"/home/prudvik/id-dataset/id-dataset/casiab/{sub_id}/{cond}/{view_angle}/"
+        # save_path = f"/home/prudvik/id-dataset/id-dataset/casiab/{sub_id}/{cond}/{view_angle}/"
+        save_path = os.path.join(save_root, f"{sub_id}/{cond}/{view_angle}/")
         
         if not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
 
-        if len(os.listdir(save_path)) >= 10:
-            break
         save_path += f"{filename}_{bkgrnd.split('/')[-1].split('.')[0]}_{shirt_color}shirt_{pant_color}pant.mp4"
 
         t.set_description(f"creating {save_path.split('/')[-1].split('.')[0]}")
         t.refresh()
         
         create_video(os.path.join(bg_path, bkgrnd), fore_path,
-                            # shirt_mask_folder, pant_mask_folder, person_mask_folder,
                             masks=masks, save_path=save_path,
                             shirt_color=shirt_color, pant_color=pant_color,
                             shirt_intensity=shirt_intensity, pant_intensity=pant_intensity)
 
+        # quit()
         thread = threading.Thread(target=create_video, 
                                   args=(os.path.join(bg_path, bkgrnd), fore_path),
                                   kwargs={
@@ -232,3 +272,5 @@ for video_file in t:
     # Wait for all threads to complete
     for thread in threads:
         thread.join()
+
+    
