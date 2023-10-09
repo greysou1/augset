@@ -30,13 +30,11 @@ def convert_folder_to_video(folder_path):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     video_writer = cv2.VideoWriter(video_file, fourcc, 30.0, (width, height))
 
-    # Convert images to video
     for image_file in image_files:
         image_path = os.path.join(folder_path, image_file)
         image = cv2.imread(image_path)
         video_writer.write(image)
 
-    # Release the video writer
     video_writer.release()
     # print(f"Conversion completed for folder: {folder_path}")
 
@@ -50,7 +48,6 @@ def process_folders(folder_path):
             thread.start()
             threads.append(thread)
 
-    # Wait for all threads to complete
     for thread in threads:
         thread.join()
 
@@ -77,6 +74,7 @@ if __name__ == "__main__":
     with tqdm(total=total) as pbar:
         for id in ids:
             for cond in os.listdir(os.path.join(main_folder, id)):
+                
                 folder_path = os.path.join(main_folder, id, cond)
                 process_folders(folder_path)
                 pbar.set_description(f'shirts-{id}-{cond}')

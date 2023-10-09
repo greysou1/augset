@@ -5,7 +5,7 @@ hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
 videos_path = "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video"
-jsons_path = "/home/c3-0/datasets/ID-dataset/casiab/metadata/jsons/person"
+jsons_path = "/home/c3-0/datasets/ID-Dataset/casiab/metadata/jsons2/person"
 
 def rectangles_overlap(rect1, rect2):
     x1_rect1, y1_rect1, x2_rect1, y2_rect1 = rect1
@@ -27,13 +27,14 @@ def load_json(json_path):
 
 
 for video in os.listdir(videos_path):
-    if "001-cl-01-090.avi" not in video: continue
+    if "001-nm-06-180.avi" not in video: continue
     if "bkgrd" in video: continue
     sub, c1, c2, view_angle = video.split(".")[0].split("-")
     cond = "-".join([c1, c2])
     json_path = os.path.join(jsons_path, sub, cond, view_angle+".json")
 
-    json_data = load_json(json_path)
+    data = load_json(json_path)
+    json_data = data["bboxes"]
     keys = sorted(list(json_data.keys()), key=int)
 
     cap = cv2.VideoCapture(os.path.join(videos_path, video))
