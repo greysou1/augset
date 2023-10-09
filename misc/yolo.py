@@ -2,8 +2,23 @@ from ultralytics import YOLO
 import cv2
 import json, time
 
+from mmcv.fileio import FileClient
+import decord
+import io as inot
+
+num_threads=1
+io_backend='disk'
+file_client = FileClient(io_backend)
+
 def load_json(json_path):
     return json.load(open(json_path))
+
+def load_video(video_path):
+    file_obj = inot.BytesIO(file_client.get(video_path))
+    container = decord.VideoReader(file_obj, num_threads=num_threads)
+    # clip = [Image.fromarray(img.asnumpy()) for img in container]
+    container = [img.asnumpy() for img in container]
+    return container 
 
 def yolo(video_file_path, model=None, batch_size=8, classes=[0], verbose=False, device='cpu'):
     """
@@ -24,37 +39,59 @@ def yolo(video_file_path, model=None, batch_size=8, classes=[0], verbose=False, 
         # This will detect classes 0 and 1 in batches of 16 frames using GPU and display verbose information.
     """
     cap = cv2.VideoCapture(video_file_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frame_buffer = [] 
+    # total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    # frame_buffer = [] 
     indices = []
     i = 0
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_buffer.append(frame)
-        # process the frames in batch
-        if len(frame_buffer) == batch_size or len(frame_buffer) == total_frames:
-
-            # Run YOLO model on the batch of frames
-            batch_results = model.predict(source=frame_buffer, classes=classes, 
+    try:
+        video = load_video(video_file_path)
+    except RuntimeError:
+        print(video_file_path)
+        return 0
+    
+    for i in range(0, len(video), batch_size):
+        batch = video[i:i+batch_size]
+        batch_results = model.predict(source=batch, classes=classes, 
                                           verbose=verbose, device=device)
-            for results in batch_results:
-                if len(results.boxes.data) > 0 and (results.boxes.data[0][5].item() == 0.0):
-                    indices.append(i)
-                i += 1
-
-            # clear the frame buffer
-            frame_buffer = []
-
-    cap.release()
-
+        for results in batch_results:
+            if len(results.boxes.data) > 0 and (results.boxes.data[0][5].item() == 0.0):
+                indices.append(i)
+            i += 1
+    
     return indices
 
+    # for frame in video:
+
+
+    # while cap.isOpened():
+    #     ret, frame = cap.read()
+    #     if not ret:
+    #         break
+
+    #     frame_buffer.append(frame)
+    #     # process the frames in batch
+    #     print(len(frame_buffer))
+    #     if len(frame_buffer) == batch_size or len(frame_buffer) == total_frames:
+
+    #         # Run YOLO model on the batch of frames
+    #         batch_results = model.predict(source=frame_buffer, classes=classes, 
+    #                                       verbose=verbose, device=device)
+    #         for results in batch_results:
+    #             if len(results.boxes.data) > 0 and (results.boxes.data[0][5].item() == 0.0):
+    #                 indices.append(i)
+    #             print(i)
+    #             i += 1
+
+    #         # clear the frame buffer
+    #         frame_buffer = []
+
+    # cap.release()
+
+    # return indices
+
 if __name__ == "__main__":
-    sub_id, cond, view_angle = "001", "bg-01", "000"
+    sub_id, cond, view_angle = "012", "bg-01", "018"
 
     video_file_path = "/home/c3-0/datasets/casia-b/orig_RGB_vids/DatasetB-1/video/"
     person_json_path = "/home/c3-0/datasets/ID-dataset/casiab/metadata/jsons/person/"
@@ -66,7 +103,7 @@ if __name__ == "__main__":
     
     start_time = time.time()
 
-    person_detected = yolo(video_file_path, model=model, batch_size=128, classes=[0], verbose=False, device=0)
+    person_detected = yolo(video_file_path, model=model, batch_size=64, classes=[0], verbose=False, device=0)
 
     end_time = time.time()
     execution_time = end_time - start_time
