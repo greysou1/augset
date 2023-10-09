@@ -8,3 +8,4 @@ GroundingDINO/groundingdino.egg-info
 segment_anything/segment_anything.egg-info
 slurm_scripts
 results/
+yolo8x.pt
