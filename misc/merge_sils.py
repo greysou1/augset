@@ -37,6 +37,7 @@ def convert_folder_to_video(folder_path):
         if int(image_file.split(".")[0].split("-")[4]) in video_indices:
             image_path = os.path.join(folder_path, image_file)
             image = cv2.imread(image_path)
+            image = cv2.resize(image, CASIA_DIMS) # resize to (320, 240)
             video_writer.write(image)
 
     video_writer.release()
@@ -63,6 +64,7 @@ def load_pickle(file_path):
 main_folder = "/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/silhouettes-shirts/"
 pickle_file = '/home/c3-0/datasets/ID-Dataset/casiab/metadata/casiab_indices.pkl'
 INDICES = load_pickle(pickle_file) # loads a dictionary
+CASIA_DIMS = (320, 240)
 
 if __name__ == "__main__":
     num_threads = os.sysconf(os.sysconf_names['SC_NPROCESSORS_ONLN'])
