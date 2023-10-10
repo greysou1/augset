@@ -68,6 +68,8 @@ def process_folders(person_path, id):
            
     
 category = "silhouettes-shirts"
+# category = "silhouettes-pants"
+# category = "silhouettes"
 main_folder = f"/home/prudvik/id-dataset/Grounded-Segment-Anything/outputs/{category}/"
 OUTPUT_FOLDER = f"/home/c3-0/datasets/ID-dataset/Casia_Silhouettes/{category}"
 make_folder(OUTPUT_FOLDER)
@@ -130,7 +132,12 @@ if __name__ == "__main__":
         
 
 # srun --pty --cpus-per-task=8 bash
+# cd ~/ReID-benchmark/
 # python test.py
+
+# OUTPUT=/home/c3-0/datasets/ID-dataset/Casia_Silhouettes/
+# ls -lR $OUTPUT | grep ".avi$" | wc -l
+
 # casiab_indices
 # >>>import pickle
 # >>>with open('/home/c3-0/datasets/ID-Dataset/casiab/metadata/casiab_indices.pkl', 'rb') as file:
